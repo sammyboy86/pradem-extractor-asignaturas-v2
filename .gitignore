@@ -40,3 +40,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# python & notebooks
+.venv/
+__pycache__/
+*.pyc
+findPdfs.ipynb
+
+# large data directories & documents
+planesSept30/
+SEDES/
+anexo3Paquete/
+anexo3PaqueteAdicional/
+*.zip
+*.pdf
