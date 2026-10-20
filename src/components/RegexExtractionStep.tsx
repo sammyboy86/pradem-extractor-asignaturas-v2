@@ -63,7 +63,10 @@ import {
   Settings2,
   Calculator,
   ArrowDownUp,
+  Download,
+  FileSpreadsheet,
 } from "lucide-react";
+import { generateSupabaseCsv, downloadCsv } from "@/lib/csv-export";
 
 interface RegexExtractionStepProps {
   batchData: BatchSummary;
@@ -413,6 +416,26 @@ export default function RegexExtractionStep({
     title: string;
     message: string;
   } | null>(null);
+
+  // ── Menú de Exportación CSV ──
+  const [showCsvMenu, setShowCsvMenu] = useState<boolean>(false);
+  const csvMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (csvMenuRef.current && !csvMenuRef.current.contains(event.target as Node)) {
+        setShowCsvMenu(false);
+      }
+    }
+    if (showCsvMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showCsvMenu]);
+
+  const totalExtractedAllDocs = useMemo(() => {
+    return Object.values(extractionsMap).reduce((acc, curr) => acc + curr.length, 0);
+  }, [extractionsMap]);
 
   // ── Visor de Markdown & Modos de Visualización ──
   const [viewMode, setViewMode] = useState<"split" | "entries" | "markdown">("split");
@@ -961,6 +984,61 @@ export default function RegexExtractionStep({
       setUploadingAll(false);
       setUploadProgress(null);
     }
+  };
+
+  // ── Descarga de CSV en formato compatible con Supabase ──
+  const handleDownloadCsv = (mode: "active_all" | "active_new" | "all_documents") => {
+    let itemsToExport: AsignaturaExtraida[] = [];
+    let filenameSuffix = "asignaturas";
+
+    if (mode === "active_new") {
+      itemsToExport = activeEntries.filter(
+        (e) => e.status !== "uploaded" && e.status !== "skipped_duplicate"
+      );
+      const cleanDocName = activeDocName.replace(/\.pdf$/i, "").replace(/[^a-zA-Z0-9_\-]/g, "_");
+      filenameSuffix = `${cleanDocName}_nuevas_supabase`;
+    } else if (mode === "all_documents") {
+      itemsToExport = Object.values(extractionsMap).flat();
+      filenameSuffix = `todas_asignaturas_lote_supabase`;
+    } else {
+      itemsToExport = activeEntries;
+      const cleanDocName = activeDocName.replace(/\.pdf$/i, "").replace(/[^a-zA-Z0-9_\-]/g, "_");
+      filenameSuffix = `${cleanDocName}_supabase`;
+    }
+
+    if (itemsToExport.length === 0) {
+      setNotification({
+        type: "warning",
+        title: "Sin asignaturas para exportar",
+        message: "No se encontraron asignaturas para descargar con el filtro seleccionado.",
+      });
+      return;
+    }
+
+    const csvContent = generateSupabaseCsv(itemsToExport);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const filename = `${filenameSuffix}_${dateStr}.csv`;
+    downloadCsv(csvContent, filename);
+
+    setNotification({
+      type: "success",
+      title: "CSV descargado con éxito",
+      message: `Se descargaron ${itemsToExport.length} asignatura(s) en formato compatible con Supabase (${filename}).`,
+    });
+  };
+
+  const handleDownloadDbRecordsCsv = () => {
+    if (dbRecords.length === 0) return;
+    const csvContent = generateSupabaseCsv(dbRecords);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const filename = `supabase_asignaturas_extraidas_${dateStr}.csv`;
+    downloadCsv(csvContent, filename);
+
+    setNotification({
+      type: "success",
+      title: "CSV de Supabase descargado",
+      message: `Se descargaron ${dbRecords.length} registro(s) consultados desde Supabase.`,
+    });
   };
 
   // 7. Drawer de inspección de Supabase
@@ -2387,6 +2465,89 @@ export default function RegexExtractionStep({
                         Verificar Claves en BD
                       </button>
 
+                      {/* Dropdown Descargar CSV en formato Supabase */}
+                      <div className="relative" ref={csvMenuRef}>
+                        <button
+                          type="button"
+                          onClick={() => setShowCsvMenu(!showCsvMenu)}
+                          disabled={activeEntries.length === 0 && totalExtractedAllDocs === 0}
+                          className="flex items-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-950/40 hover:bg-cyan-900/50 text-cyan-200 px-3.5 py-2 text-xs font-semibold shadow-md shadow-cyan-950/20 transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                          title="Descargar las asignaturas extraídas en archivo CSV formateado para Supabase"
+                        >
+                          <FileSpreadsheet className="h-3.5 w-3.5 text-cyan-400" />
+                          <span>Descargar CSV (Supabase)</span>
+                          <ChevronDown className={`h-3 w-3 text-cyan-400 transition-transform ${showCsvMenu ? "rotate-180" : ""}`} />
+                        </button>
+
+                        {showCsvMenu && (
+                          <div className="absolute right-0 top-full mt-2 w-72 rounded-xl border border-white/10 bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-md z-30 space-y-1">
+                            <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 border-b border-white/5 flex items-center justify-between">
+                              <span>Exportar para Supabase (.csv)</span>
+                              <span className="text-[10px] text-emerald-400 font-mono">RFC 4180</span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleDownloadCsv("active_all");
+                                setShowCsvMenu(false);
+                              }}
+                              disabled={activeEntries.length === 0}
+                              className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-left text-xs text-white hover:bg-white/10 transition disabled:opacity-40 cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Download className="h-3.5 w-3.5 text-cyan-400" />
+                                <span>Todas del documento actual</span>
+                              </div>
+                              <span className="text-[10px] font-mono text-cyan-300 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-500/30">
+                                {activeEntries.length}
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleDownloadCsv("active_new");
+                                setShowCsvMenu(false);
+                              }}
+                              disabled={stats.readyToUpload === 0}
+                              className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-left text-xs text-white hover:bg-white/10 transition disabled:opacity-40 cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Download className="h-3.5 w-3.5 text-emerald-400" />
+                                <span>Solo nuevas (no en Supabase)</span>
+                              </div>
+                              <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                                {stats.readyToUpload}
+                              </span>
+                            </button>
+
+                            {totalExtractedAllDocs > activeEntries.length && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleDownloadCsv("all_documents");
+                                  setShowCsvMenu(false);
+                                }}
+                                className="w-full flex items-center justify-between rounded-lg px-3 py-2 text-left text-xs text-white hover:bg-white/10 transition cursor-pointer"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Download className="h-3.5 w-3.5 text-indigo-400" />
+                                  <span>Todos los documentos del lote</span>
+                                </div>
+                                <span className="text-[10px] font-mono text-indigo-300 bg-indigo-950/60 px-1.5 py-0.5 rounded border border-indigo-500/30">
+                                  {totalExtractedAllDocs}
+                                </span>
+                              </button>
+                            )}
+
+                            <div className="px-3 py-1 text-[10px] text-slate-500 border-t border-white/5 leading-relaxed">
+                              Columnas: <span className="font-mono text-slate-400">nombre, clave, fines_de_aprendizaje_o_formacion, contenido_tematico, actividades_de_aprendizaje</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       <button
                         type="button"
                         onClick={handleUploadAllNew}
@@ -3160,18 +3321,30 @@ export default function RegexExtractionStep({
               )}
             </div>
 
-            <div className="pt-4 border-t border-white/10 flex items-center justify-between">
+            <div className="pt-4 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3">
               <span className="text-xs text-slate-500">
                 Mostrando {dbRecords.length} de {dbTotalCount} registros
               </span>
-              <button
-                type="button"
-                onClick={fetchDbRecords}
-                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-white transition cursor-pointer"
-              >
-                <RefreshCw className={`h-3 w-3 ${loadingDbRecords ? "animate-spin" : ""}`} />
-                Actualizar
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadDbRecordsCsv}
+                  disabled={dbRecords.length === 0}
+                  className="flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-950/40 px-3 py-1.5 text-xs text-cyan-300 hover:bg-cyan-900/50 transition cursor-pointer disabled:opacity-40"
+                  title="Descargar los registros de Supabase como archivo CSV"
+                >
+                  <Download className="h-3.5 w-3.5 text-cyan-400" />
+                  Descargar CSV ({dbRecords.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={fetchDbRecords}
+                  className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-white transition cursor-pointer"
+                >
+                  <RefreshCw className={`h-3 w-3 ${loadingDbRecords ? "animate-spin" : ""}`} />
+                  Actualizar
+                </button>
+              </div>
             </div>
           </div>
         </div>
